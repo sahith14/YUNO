@@ -105,6 +105,9 @@ export async function attachSocketIO(app: AnyFastifyInstance): Promise<IO> {
             host === "localhost" ||
             host === "127.0.0.1" ||
             host.endsWith(".trycloudflare.com") ||
+            host.endsWith(".vercel.app") ||
+            host.endsWith(".fly.dev") ||
+            host.endsWith(".ngrok-free.app") ||
             env.WEB_PUBLIC_URL.split(",").map((s) => s.trim()).includes(origin)
           ) {
             return cb(null, true);

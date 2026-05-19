@@ -55,14 +55,21 @@ async function main() {
   await app.register(cors, {
     origin: (origin, cb) => {
       if (!origin) return cb(null, true); // server-to-server / curl
-      // Allow localhost (any port) and any *.trycloudflare.com tunnel during dev
-      if (
-        /^http:\/\/localhost(:\d+)?$/.test(origin) ||
-        /^http:\/\/127\.0\.0\.1(:\d+)?$/.test(origin) ||
-        /\.trycloudflare\.com$/.test(new URL(origin).hostname) ||
-        env.WEB_URL.split(",").map((s) => s.trim()).includes(origin)
-      ) {
-        return cb(null, true);
+      try {
+        const host = new URL(origin).hostname;
+        if (
+          host === "localhost" ||
+          host === "127.0.0.1" ||
+          host.endsWith(".trycloudflare.com") ||
+          host.endsWith(".vercel.app") ||
+          host.endsWith(".fly.dev") ||
+          host.endsWith(".ngrok-free.app") ||
+          env.WEB_URL.split(",").map((s) => s.trim()).includes(origin)
+        ) {
+          return cb(null, true);
+        }
+      } catch {
+        /* fall through */
       }
       cb(new Error(`CORS: origin ${origin} not allowed`), false);
     },
