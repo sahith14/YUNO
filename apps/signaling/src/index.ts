@@ -18,7 +18,23 @@ async function main() {
   });
 
   await app.register(cors, {
-    origin: env.WEB_PUBLIC_URL.split(",").map((s) => s.trim()),
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true);
+      try {
+        const host = new URL(origin).hostname;
+        if (
+          host === "localhost" ||
+          host === "127.0.0.1" ||
+          host.endsWith(".trycloudflare.com") ||
+          env.WEB_PUBLIC_URL.split(",").map((s) => s.trim()).includes(origin)
+        ) {
+          return cb(null, true);
+        }
+      } catch {
+        /* fall through */
+      }
+      cb(new Error(`CORS: origin ${origin} not allowed`), false);
+    },
     credentials: true,
   });
 

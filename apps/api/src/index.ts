@@ -53,7 +53,19 @@ async function main() {
   });
 
   await app.register(cors, {
-    origin: env.WEB_URL.split(",").map((s) => s.trim()),
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true); // server-to-server / curl
+      // Allow localhost (any port) and any *.trycloudflare.com tunnel during dev
+      if (
+        /^http:\/\/localhost(:\d+)?$/.test(origin) ||
+        /^http:\/\/127\.0\.0\.1(:\d+)?$/.test(origin) ||
+        /\.trycloudflare\.com$/.test(new URL(origin).hostname) ||
+        env.WEB_URL.split(",").map((s) => s.trim()).includes(origin)
+      ) {
+        return cb(null, true);
+      }
+      cb(new Error(`CORS: origin ${origin} not allowed`), false);
+    },
     credentials: true,
   });
 
