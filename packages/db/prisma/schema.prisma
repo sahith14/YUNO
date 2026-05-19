@@ -1,0 +1,398 @@
+// =============================================================================
+// YUNO — Prisma schema
+// See docs/08-database-schema.md for design rationale.
+// =============================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [citext, pgcrypto]
+}
+
+// -----------------------------------------------------------------------------
+// USER
+// -----------------------------------------------------------------------------
+
+enum UserKind {
+  guest
+  user
+  admin
+}
+
+enum VerifiedLabel {
+  female
+  male
+  non_binary
+}
+
+// Self-declared at signup. NOT identity-verified — that's what `verifiedLabel` is for.
+// `prefer_not_to_say` = no label, treated as opt-out of gender filtering.
+enum SelfGender {
+  female
+  male
+  prefer_not_to_say
+}
+
+model User {
+  id                      String         @id @default(uuid()) @db.Uuid
+  createdAt               DateTime       @default(now()) @map("created_at")
+  lastSeenAt              DateTime       @default(now()) @map("last_seen_at")
+
+  // identity (all optional — guests have none)
+  displayHandle           String?        @map("display_handle")
+  email                   String?        @unique @db.Citext
+  emailVerifiedAt         DateTime?      @map("email_verified_at")
+  passwordHash            String?        @map("password_hash")
+
+  // anti-abuse
+  deviceFingerprintHash   String?        @map("device_fingerprint_hash")
+  ipCountry               String?        @map("ip_country")  // ISO-2
+
+  // reputation & state
+  reputationScore         Int            @default(1000) @map("reputation_score")
+  isShadowBanned          Boolean        @default(false) @map("is_shadow_banned")
+  banUntil                DateTime?      @map("ban_until")
+  isAdmin                 Boolean        @default(false) @map("is_admin")
+
+  // commerce
+  premiumUntil            DateTime?      @map("premium_until")
+
+  // verification (mirrored)
+  verifiedAt              DateTime?      @map("verified_at")
+  verifiedLabel           VerifiedLabel? @map("verified_label")
+  ageYear                 Int?           @map("age_year")
+
+  // self-declared gender (used for filter matching pre-verification)
+  selfGender              SelfGender?    @map("self_gender")
+
+  // localization / cohort
+  createdCountry          String?        @map("created_country")
+  locale                  String?
+
+  // legal
+  consentAge18            Boolean        @default(false) @map("consent_age_18")
+  consentTermsAt          DateTime?      @map("consent_terms_at")
+
+  // privacy preferences
+  privacyInvisible        Boolean        @default(false) @map("privacy_invisible")
+  acceptsReconnect        Boolean        @default(true)  @map("accepts_reconnect")
+
+  // relations
+  interests               UserInterest[]
+  sessionsAsA             Session[]            @relation("SessionsAsA")
+  sessionsAsB             Session[]            @relation("SessionsAsB")
+  reportsFiled            Report[]             @relation("ReportsFiled")
+  reportsAgainst          Report[]             @relation("ReportsAgainst")
+  reportsActioned         Report[]             @relation("ReportsActioned")
+  bans                    Ban[]                @relation("BansOnUser")
+  bansIssued              Ban[]                @relation("BansIssuedBy")
+  premiumSub              PremiumSub?
+  verification            Verification?
+  matchLogs               MatchLog[]
+  reputationEvents        ReputationEvent[]
+  reconnectTokensIssued   ReconnectToken[]     @relation("ReconnectIssuedTo")
+  reconnectTokensTarget   ReconnectToken[]     @relation("ReconnectTarget")
+  moderationActionsByMe   ModerationAction[]   @relation("ModActionsBy")
+  moderationActionsOnMe   ModerationAction[]   @relation("ModActionsOnUser")
+
+  @@index([deviceFingerprintHash])
+  @@index([reputationScore])
+  @@index([banUntil])
+  @@index([premiumUntil])
+  @@map("users")
+}
+
+// -----------------------------------------------------------------------------
+// INTERESTS
+// -----------------------------------------------------------------------------
+
+model Interest {
+  id         String         @id @default(uuid()) @db.Uuid
+  slug       String         @unique
+  label      String
+  category   String
+  isActive   Boolean        @default(true) @map("is_active")
+  createdAt  DateTime       @default(now()) @map("created_at")
+
+  users      UserInterest[]
+
+  @@map("interests")
+}
+
+model UserInterest {
+  userId     String   @map("user_id") @db.Uuid
+  interestId String   @map("interest_id") @db.Uuid
+  addedAt    DateTime @default(now()) @map("added_at")
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  interest   Interest @relation(fields: [interestId], references: [id], onDelete: Cascade)
+
+  @@id([userId, interestId])
+  @@index([interestId])
+  @@map("user_interests")
+}
+
+// -----------------------------------------------------------------------------
+// SESSIONS  — metadata only, no content
+// -----------------------------------------------------------------------------
+
+enum Modality {
+  video
+  audio
+  text
+}
+
+enum SessionEndReason {
+  skip_a
+  skip_b
+  disconnect_a
+  disconnect_b
+  report_a
+  report_b
+  moderator
+  system
+}
+
+model Session {
+  id              String              @id @default(uuid()) @db.Uuid
+  userAId         String              @map("user_a_id") @db.Uuid
+  userBId         String              @map("user_b_id") @db.Uuid
+  startedAt       DateTime            @default(now()) @map("started_at")
+  endedAt         DateTime?           @map("ended_at")
+  endedReason     SessionEndReason?   @map("ended_reason")
+  modality        Modality            @default(video)
+  iceRelayUsed    Boolean             @default(false) @map("ice_relay_used")
+  matchedVia      String              @default("random") @map("matched_via")
+  reported        Boolean             @default(false)
+
+  userA           User                @relation("SessionsAsA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB           User                @relation("SessionsAsB", fields: [userBId], references: [id], onDelete: Cascade)
+  reports         Report[]
+  reconnectTokens ReconnectToken[]
+
+  @@index([startedAt(sort: Desc)])
+  @@index([userAId, startedAt(sort: Desc)])
+  @@index([userBId, startedAt(sort: Desc)])
+  @@map("sessions")
+}
+
+// -----------------------------------------------------------------------------
+// REPORTS
+// -----------------------------------------------------------------------------
+
+enum ReportCategory {
+  nsfw
+  minor
+  harassment
+  violence
+  scam
+  other
+}
+
+enum ReportStatus {
+  pending
+  actioned
+  dismissed
+  auto_actioned
+}
+
+enum ReportAction {
+  warn
+  shadow_ban_24h
+  ban_7d
+  ban_perm
+  dismiss
+}
+
+model Report {
+  id              String         @id @default(uuid()) @db.Uuid
+  sessionId       String         @map("session_id") @db.Uuid
+  reporterId      String         @map("reporter_id") @db.Uuid
+  reporteeId      String         @map("reportee_id") @db.Uuid
+  category        ReportCategory
+  note            String?        @db.VarChar(500)
+  evidenceS3Key   String?        @map("evidence_s3_key")
+  status          ReportStatus   @default(pending)
+  createdAt       DateTime       @default(now()) @map("created_at")
+  actionedById    String?        @map("actioned_by") @db.Uuid
+  actionedAt      DateTime?      @map("actioned_at")
+  actionTaken     ReportAction?  @map("action_taken")
+
+  session            Session            @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  reporter           User               @relation("ReportsFiled", fields: [reporterId], references: [id], onDelete: Cascade)
+  reportee           User               @relation("ReportsAgainst", fields: [reporteeId], references: [id], onDelete: Cascade)
+  actionedBy         User?              @relation("ReportsActioned", fields: [actionedById], references: [id], onDelete: SetNull)
+  moderationActions  ModerationAction[]
+
+  @@index([status, createdAt])
+  @@index([reporteeId, createdAt(sort: Desc)])
+  @@index([reporterId, createdAt(sort: Desc)])
+  @@map("reports")
+}
+
+// -----------------------------------------------------------------------------
+// BANS
+// -----------------------------------------------------------------------------
+
+model Ban {
+  id                     String    @id @default(uuid()) @db.Uuid
+  userId                 String    @map("user_id") @db.Uuid
+  deviceFingerprintHash  String?   @map("device_fingerprint_hash")
+  ipCidr                 String?   @map("ip_cidr")
+  reason                 String
+  startsAt               DateTime  @default(now()) @map("starts_at")
+  endsAt                 DateTime? @map("ends_at")
+  issuedById             String?   @map("issued_by") @db.Uuid
+  createdAt              DateTime  @default(now()) @map("created_at")
+
+  user                   User      @relation("BansOnUser",     fields: [userId],     references: [id], onDelete: Cascade)
+  issuedBy               User?     @relation("BansIssuedBy",   fields: [issuedById], references: [id], onDelete: SetNull)
+
+  @@index([userId, endsAt])
+  @@index([deviceFingerprintHash])
+  @@map("bans")
+}
+
+// -----------------------------------------------------------------------------
+// PREMIUM
+// -----------------------------------------------------------------------------
+
+enum PremiumProduct {
+  premium
+  verified
+  bundle
+}
+
+enum SubStatus {
+  active
+  trialing
+  past_due
+  canceled
+  incomplete
+}
+
+model PremiumSub {
+  id                   String         @id @default(uuid()) @db.Uuid
+  userId               String         @unique @map("user_id") @db.Uuid
+  stripeCustomerId     String         @map("stripe_customer_id")
+  stripeSubscriptionId String         @unique @map("stripe_subscription_id")
+  product              PremiumProduct
+  status               SubStatus
+  currentPeriodEnd     DateTime       @map("current_period_end")
+  cancelAtPeriodEnd    Boolean        @default(false) @map("cancel_at_period_end")
+  updatedAt            DateTime       @default(now()) @updatedAt @map("updated_at")
+
+  user                 User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, currentPeriodEnd])
+  @@map("premium_subs")
+}
+
+// -----------------------------------------------------------------------------
+// VERIFICATION
+// -----------------------------------------------------------------------------
+
+enum VerificationStatus {
+  pending
+  verified
+  rejected
+}
+
+model Verification {
+  userId                       String              @id @map("user_id") @db.Uuid
+  stripeVerificationSessionId  String              @map("stripe_verification_session_id")
+  status                       VerificationStatus
+  documentHash                 String              @unique @map("document_hash")
+  reportedGender               VerifiedLabel       @map("reported_gender")
+  yearOfBirth                  Int                 @map("year_of_birth")
+  documentCountry              String              @map("document_country")
+  verifiedAt                   DateTime            @default(now()) @map("verified_at")
+
+  user                         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("verifications")
+}
+
+// -----------------------------------------------------------------------------
+// MATCH LOGS  — short retention, used for queue health metrics
+// -----------------------------------------------------------------------------
+
+model MatchLog {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  joinedQueueAt    DateTime  @default(now()) @map("joined_queue_at")
+  matchedAt        DateTime? @map("matched_at")
+  leftQueueAt      DateTime? @map("left_queue_at")
+  filtersJson      Json      @default("{}") @map("filters_json")
+
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, joinedQueueAt(sort: Desc)])
+  @@index([joinedQueueAt])
+  @@map("match_logs")
+}
+
+// -----------------------------------------------------------------------------
+// REPUTATION
+// -----------------------------------------------------------------------------
+
+model ReputationEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  delta     Int
+  reason    String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("reputation_events")
+}
+
+// -----------------------------------------------------------------------------
+// RECONNECT TOKENS  (Premium feature)
+// -----------------------------------------------------------------------------
+
+model ReconnectToken {
+  id            String    @id @default(uuid()) @db.Uuid
+  sessionId     String    @map("session_id") @db.Uuid
+  issuedToId    String    @map("issued_to") @db.Uuid
+  targetUserId  String    @map("target_user_id") @db.Uuid
+  expiresAt     DateTime  @map("expires_at")
+  consumedAt    DateTime? @map("consumed_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  session       Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  issuedTo      User      @relation("ReconnectIssuedTo", fields: [issuedToId],   references: [id], onDelete: Cascade)
+  target        User      @relation("ReconnectTarget",   fields: [targetUserId], references: [id], onDelete: Cascade)
+
+  @@index([issuedToId, expiresAt])
+  @@map("reconnect_tokens")
+}
+
+// -----------------------------------------------------------------------------
+// MODERATION AUDIT
+// -----------------------------------------------------------------------------
+
+model ModerationAction {
+  id            String   @id @default(uuid()) @db.Uuid
+  moderatorId   String   @map("moderator_id") @db.Uuid
+  targetUserId  String   @map("target_user_id") @db.Uuid
+  reportId      String?  @map("report_id") @db.Uuid
+  action        String
+  notes         String?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  moderator     User     @relation("ModActionsBy",     fields: [moderatorId],  references: [id], onDelete: Cascade)
+  targetUser    User     @relation("ModActionsOnUser", fields: [targetUserId], references: [id], onDelete: Cascade)
+  report        Report?  @relation(fields: [reportId], references: [id], onDelete: SetNull)
+
+  @@index([targetUserId, createdAt(sort: Desc)])
+  @@index([moderatorId, createdAt(sort: Desc)])
+  @@map("moderation_actions")
+}

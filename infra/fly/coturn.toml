@@ -1,0 +1,51 @@
+# yuno-coturn — single-region TURN/STUN deployment template
+# Deploy one of these per region: iad, lhr, sin, gru, syd, etc.
+# Replace the {REGION} placeholder via `fly deploy --app yuno-coturn-iad`.
+
+app = "yuno-coturn-iad"
+primary_region = "iad"
+
+# Coturn runs from the official image with our turnserver.conf bind-mounted.
+# We ship the conf via Dockerfile or via fly secrets pull. For the simplest
+# path, build a thin image that just COPYs our turnserver.conf in.
+[build]
+  image = "coturn/coturn:4.6"
+
+# UDP is the protocol we care about most for relay performance.
+[[services]]
+  protocol = "udp"
+  internal_port = 3478
+  [[services.ports]]
+    port = 3478
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 3478
+  [[services.ports]]
+    port = 3478
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 5349
+  [[services.ports]]
+    port = 5349
+    handlers = ["tls"]
+
+# Relay range
+[[services]]
+  protocol = "udp"
+  internal_port = 49160
+  [[services.ports]]
+    port = 49160
+[[services]]
+  protocol = "udp"
+  internal_port = 49200
+  [[services.ports]]
+    port = 49200
+
+[[vm]]
+  size = "performance-2x"
+  memory_mb = 2048
+
+[deploy]
+  strategy = "immediate"

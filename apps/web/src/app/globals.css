@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+  background-color: theme("colors.ink.950");
+  color: theme("colors.cream.50");
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overscroll-behavior: none;
+}
+
+/* Hide native focus rings for buttons; we add our own */
+button:focus {
+  outline: none;
+}
+
+/* Subtle grain texture over the whole page for depth */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.45;
+  background-image: theme("backgroundImage.grain");
+  mix-blend-mode: overlay;
+  z-index: 100;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: theme("colors.ink.600");
+  border-radius: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Utility: cinematic border */
+.cinematic-border {
+  position: relative;
+}
+.cinematic-border::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: inherit;
+  pointer-events: none;
+}

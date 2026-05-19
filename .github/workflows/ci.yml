@@ -1,0 +1,45 @@
+# GitHub Actions — typecheck + lint + build for every PR.
+
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: yuno
+          POSTGRES_PASSWORD: yuno
+          POSTGRES_DB: yuno
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U yuno"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+    env:
+      DATABASE_URL: postgresql://yuno:yuno@localhost:5432/yuno
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: ci-only-jwt-secret-please-replace-in-prod-with-long-random
+      INTERNAL_SECRET: ci-only-internal-secret
+      TURN_SHARED_SECRET: ci-only-turn-shared-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile=false
+      - run: pnpm --filter @yuno/db run generate
+      - run: pnpm typecheck
+      - run: pnpm build

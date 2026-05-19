@@ -1,0 +1,31 @@
+{
+  "name": "yuno",
+  "version": "0.1.0",
+  "private": true,
+  "description": "YUNO — anonymous random video chat. Real strangers. Real conversations.",
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel --stream run dev",
+    "dev:web": "pnpm --filter @yuno/web dev",
+    "dev:signaling": "pnpm --filter @yuno/signaling dev",
+    "dev:api": "pnpm --filter @yuno/api dev",
+    "build": "pnpm -r run build",
+    "lint": "pnpm -r run lint",
+    "typecheck": "pnpm -r run typecheck",
+    "db:generate": "pnpm --filter @yuno/db run generate",
+    "db:migrate": "pnpm --filter @yuno/db run migrate:dev",
+    "db:studio": "pnpm --filter @yuno/db run studio",
+    "infra:up": "docker compose -f docker-compose.dev.yml up -d",
+    "infra:down": "docker compose -f docker-compose.dev.yml down",
+    "infra:logs": "docker compose -f docker-compose.dev.yml logs -f"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "@types/node": "^20.14.10",
+    "tsx": "^4.16.2",
+    "prettier": "^3.3.3"
+  }
+}

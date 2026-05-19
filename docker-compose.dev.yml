@@ -1,0 +1,104 @@
+version: "3.9"
+
+# Local development infra for YUNO.
+# Brings up: Postgres, Redis, Coturn, and (optionally) the app services.
+# Run app services natively with `pnpm dev` for fast iteration, or
+# bring up everything with `docker compose --profile full up`.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: yuno-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-yuno}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-yuno_dev_pw}
+      POSTGRES_DB: ${POSTGRES_DB:-yuno}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - yuno-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-yuno} -d ${POSTGRES_DB:-yuno}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: yuno-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - yuno-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  coturn:
+    image: coturn/coturn:4.6
+    container_name: yuno-coturn
+    restart: unless-stopped
+    network_mode: host  # required for proper UDP relay; on Windows/Mac fall back to ports below
+    volumes:
+      - ./infra/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+    command: ["-c", "/etc/coturn/turnserver.conf"]
+    profiles: ["turn", "full"]
+
+  # ---------- Optional app services for "full" profile ----------
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: yuno-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-yuno}:${POSTGRES_PASSWORD:-yuno_dev_pw}@postgres:5432/${POSTGRES_DB:-yuno}?schema=public
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "${API_PORT:-4000}:4000"
+    profiles: ["full"]
+
+  signaling:
+    build:
+      context: .
+      dockerfile: apps/signaling/Dockerfile
+    container_name: yuno-signaling
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "${SIGNALING_PORT:-4001}:4001"
+    profiles: ["full"]
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: yuno-web
+    restart: unless-stopped
+    depends_on:
+      - api
+      - signaling
+    env_file: .env
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    profiles: ["full"]
+
+volumes:
+  yuno-postgres-data:
+  yuno-redis-data:
